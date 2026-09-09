@@ -19,12 +19,10 @@ const recommendation: RecommendedPaper = {
   interestCluster: { id: 3, labels: ["resilient urban mobility"] }
 };
 
-function summaryRequestKind(requestBody: string): "headline" | "overview" | "tldr" {
+function summaryRequestKind(requestBody: string): "brief" | "tldr" {
   const payload = JSON.parse(requestBody) as { messages: Array<{ content: string }> };
   const prompt = payload.messages[0]?.content ?? "";
-  if (prompt.includes("subject–verb–object phrase")) return "headline";
-  if (prompt.includes("concise editorial sentence")) return "overview";
-  return "tldr";
+  return prompt.includes("compact editorial brief") ? "brief" : "tldr";
 }
 
 const config: Pick<AppConfig, "interests" | "summary" | "dailyRomance" | "delivery" | "runtime"> = {
@@ -88,7 +86,7 @@ describe("Recommendation Delivery", () => {
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const requestBody = String(init?.body);
-        if (summaryRequestKind(requestBody) === "headline") {
+        if (summaryRequestKind(requestBody) === "brief") {
           return new Response("unavailable", { status: 503 });
         }
         return new Response(
@@ -186,12 +184,9 @@ describe("Recommendation Delivery", () => {
   it("keeps the dated main-branch subject when the LLM succeeds", async () => {
     const fetchMock = mock(async (_url: string, init?: RequestInit) => {
         const requestBody = String(init?.body);
-        const kind = summaryRequestKind(requestBody);
-        const content = kind === "headline"
-          ? "韧性街道值得优先关注"
-          : kind === "overview"
-            ? "街道尺度的空间结构揭示了交通系统的韧性差异。"
-            : "论文从街道尺度分析交通系统的气候韧性。";
+        const content = summaryRequestKind(requestBody) === "brief"
+          ? "Headline: 韧性街道值得优先关注\nOverview: 街道尺度的空间结构揭示了交通系统的韧性差异。"
+          : "论文从街道尺度分析交通系统的气候韧性。";
         return new Response(
           JSON.stringify({
             choices: [
@@ -227,7 +222,8 @@ describe("Recommendation Delivery", () => {
       "Paper feed for 25th August 2026"
     );
     const requestBodies = fetchMock.mock.calls.map((call) => String(call[1]?.body));
-    expect(requestBodies.some((body) => body.includes("Cluster 1: resilient urban mobility"))).toBeTrue();
+    expect(requestBodies.some((body) => body.includes("Recommended paper 1"))).toBeTrue();
+    expect(requestBodies.some((body) => body.includes("Reader interests: resilient urban mobility"))).toBeTrue();
     expect(requestBodies.every((body) => !body.includes(config.interests.profile.summary))).toBeTrue();
   });
 });

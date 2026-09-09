@@ -3,8 +3,8 @@ import { hasMeaningfulAbstract } from "./text.js";
 import type { InterestClusterSummary, RecommendedPaper } from "./types.js";
 
 const MAX_ABSTRACT_INPUT_LENGTH = 4_000;
-const PAPER_TLDR_CONCURRENCY = 4;
-const GENERATION_REQUEST_CONCURRENCY = 4;
+const MAX_BRIEF_ABSTRACT_INPUT_LENGTH = 800;
+const PAPER_TLDR_CONCURRENCY = 3;
 const GENERATION_REQUEST_TIMEOUT_MS = 60_000;
 const MAX_HEADLINE_CJK_UNITS = 14;
 const MAX_HEADLINE_WORDS = 10;
@@ -20,11 +20,6 @@ const BRIEFING_META_LANGUAGE = [
   /(?:今天|今日|这些|本期|所选)(?:的)?论文/u,
   /(?:该|这个|上述)标题/u,
   /(?:论文|文章)\s*\d+/u
-];
-const OVERVIEW_LIST_LANGUAGE = [
-  /\b(?:additionally|elsewhere|other (?:papers|studies)|also (?:covers|examines|explores))\b/iu,
-  /(?:此外|另外|其余|其他)(?:论文|研究|内容|主题)?/u,
-  /(?:还|也)(?:讨论|涵盖|介绍|关注)/u
 ];
 
 export type PaperBrief = {
@@ -55,6 +50,13 @@ function compact(value: string, maxLength = Number.POSITIVE_INFINITY): string {
     : `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
+function balancedExcerpt(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  const sideLength = Math.floor((maxLength - 5) / 2);
+  return `${normalized.slice(0, sideLength).trimEnd()} ... ${normalized.slice(-sideLength).trimStart()}`;
+}
+
 function requiredText(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`Generation API returned an invalid ${label}.`);
@@ -77,23 +79,6 @@ function researchSynthesis(value: unknown, label: string): string {
     throw new Error(`Generation API returned ${label} with briefing meta-language.`);
   }
   return text;
-}
-
-function sharesLongPhrase(left: string, right: string): boolean {
-  const leftHan = left.match(/\p{Script=Han}/gu)?.join("") ?? "";
-  const rightHan = right.match(/\p{Script=Han}/gu)?.join("") ?? "";
-  const shorterHan = leftHan.length <= rightHan.length ? leftHan : rightHan;
-  const longerHan = leftHan.length <= rightHan.length ? rightHan : leftHan;
-  for (let index = 0; index <= shorterHan.length - 6; index += 1) {
-    if (longerHan.includes(shorterHan.slice(index, index + 6))) return true;
-  }
-
-  const leftWords = canonicalText(left).split(" ").filter(Boolean);
-  const rightText = ` ${canonicalText(right)} `;
-  for (let index = 0; index <= leftWords.length - 3; index += 1) {
-    if (rightText.includes(` ${leftWords.slice(index, index + 3).join(" ")} `)) return true;
-  }
-  return false;
 }
 
 function shortHeadline(value: unknown): string {
@@ -122,11 +107,11 @@ function shortOverview(value: unknown, headline: string): string {
     throw new Error(`Generation API returned an overview over ${maxUnits} units.`);
   }
   const sentenceEndings = text.match(/[。！？!?]+|\.(?=\s+[A-Z]|$)/gu)?.length ?? 0;
-  if (sentenceEndings > 1 || /[;；•]/u.test(text) || OVERVIEW_LIST_LANGUAGE.some((pattern) => pattern.test(text))) {
-    throw new Error("Generation API returned a list-like overview.");
+  if (sentenceEndings > 1) {
+    throw new Error("Generation API returned a multi-sentence overview.");
   }
-  if (sharesLongPhrase(headline, text)) {
-    throw new Error("Generation API returned an overview that repeats the headline.");
+  if (canonicalText(headline) === canonicalText(text)) {
+    throw new Error("Generation API returned an overview identical to the headline.");
   }
   return text;
 }
@@ -242,12 +227,8 @@ function createGenerationRequestLimiter(maxConcurrent: number): GenerationReques
   };
 }
 
-function headlineSystemPrompt(language: string): string {
-  return `Choose the most significant candidate. Write a very short ${language} headline as a subject–verb–object phrase, like “OpenAI shuts off Cursor” or “交通扩展改变出行”. Maximum: 10 English words or 14 Chinese characters. Return only the headline.`;
-}
-
-function overviewSystemPrompt(language: string): string {
-  return `Write one concise editorial sentence in ${language}. Synthesize the strongest one or two source insights into one useful takeaway beyond the headline. Aim for 24–36 Chinese characters or 12–20 English words. Return only the sentence.`;
+function todayBriefSystemPrompt(language: string): string {
+  return `Write a compact editorial brief in ${language}. Read every recommended paper. Use domain knowledge to choose the strongest story: one standout insight or a meaningful connection among a few. Coverage is not a goal; never list papers. Ground every claim in the sources. Return exactly two plain-text lines:\nHeadline: concrete subject–verb–object phrase; max 10 English words or 14 Chinese characters\nOverview: one useful source-grounded sentence; max 24 English words or 42 Chinese characters`;
 }
 
 function paperBriefSystemPrompt(language: string, hasAbstract: boolean): string {
@@ -260,54 +241,40 @@ function todayBriefSource(
   papers: RecommendedPaper[],
   interestClusters: InterestClusterSummary[]
 ): string {
-  const clusters = interestClusters.length > 0
-    ? interestClusters.map((cluster, index) => `Cluster ${index + 1}: ${cluster.labels.join("; ")}`).join("\n")
-    : "No reader interest clusters supplied.";
-  return `Reader interest clusters (aggregated labels only):\n${clusters}\n\n${papers
-    .map((paper, index) => paperSource(paper, index))
-    .join("\n\n")}`;
-}
-
-function headlineCandidatesSource(papers: RecommendedPaper[]): string {
-  return papers
-    .map((paper, index) => `Candidate ${index + 1}\nJournal: ${paper.journal}\nTitle: ${paper.title}`)
+  const interests = interestClusters.flatMap((cluster) => cluster.labels).join("; ");
+  const sources = papers
+    .map((paper, index) => {
+      return [
+        `Recommended paper ${index + 1}`,
+        `Journal: ${paper.journal}`,
+        `Title: ${paper.title}`,
+        ...(hasMeaningfulAbstract(paper.abstract)
+          ? [`Abstract: ${balancedExcerpt(paper.abstract, MAX_BRIEF_ABSTRACT_INPUT_LENGTH)}`]
+          : [])
+      ].join("\n");
+    })
     .join("\n\n");
+  return `Reader interests: ${interests || "not supplied"}\n\n${sources}`;
 }
 
-async function generateBriefField(
-  request: GenerationRequest,
-  config: SummaryConfig,
-  label: string,
-  systemPrompt: string,
-  source: string,
-  maxTokens: number,
-  validate: (value: string) => string
-): Promise<string> {
-  try {
-    return validate(plainTextResponse(await request(config, systemPrompt, source, maxTokens), label));
-  } catch (error) {
-    console.log(
-      `[summary] Retrying Today Brief ${label} after failure: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-    const correction = label === "headline"
-      ? "Compress the headline into a subject–verb–object phrase like “交通扩展改变出行”. Maximum: 10 English words or 14 Chinese characters. Return only the headline."
-      : label === "overview"
-        ? "Rewrite as one cohesive takeaway from the strongest one or two source insights, using fresh wording. Target 24–36 Chinese characters or 12–20 English words. Return only the sentence."
-      : `Write a valid ${label} as plain text using the source rules.`;
-    return validate(
-      plainTextResponse(
-        await request(
-          config,
-          systemPrompt,
-          `${source}\n\nCorrection: ${correction}`,
-          maxTokens
-        ),
-        label
-      )
-    );
+function parseTodayBrief(content: string): TodayBrief {
+  const lines = content
+    .replace(/^```[a-z]*\s*/iu, "")
+    .replace(/\s*```$/u, "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length !== 2) {
+    throw new Error("Generation API returned a Today Brief outside the two-line format.");
   }
+  const headlineMatch = lines[0]?.match(/^Headline\s*[:：]\s*(.+)$/iu);
+  const overviewMatch = lines[1]?.match(/^Overview\s*[:：]\s*(.+)$/iu);
+  if (!headlineMatch?.[1] || !overviewMatch?.[1]) {
+    throw new Error("Generation API returned a Today Brief without labeled fields.");
+  }
+  const headline = shortHeadline(plainTextResponse(headlineMatch[1], "headline"));
+  const overview = shortOverview(plainTextResponse(overviewMatch[1], "overview"), headline);
+  return { headline, overview };
 }
 
 async function generateTodayBrief(
@@ -316,27 +283,25 @@ async function generateTodayBrief(
   papers: RecommendedPaper[],
   interestClusters: InterestClusterSummary[]
 ): Promise<TodayBrief> {
+  const systemPrompt = todayBriefSystemPrompt(config.language);
   const source = todayBriefSource(papers, interestClusters);
-  const headlineSource = headlineCandidatesSource(papers);
-  const headline = await generateBriefField(
-    request,
-    config,
-    "headline",
-    headlineSystemPrompt(config.language),
-    headlineSource,
-    Math.min(config.maxTokens, 512),
-    shortHeadline
-  );
-  const overview = await generateBriefField(
-    request,
-    config,
-    "overview",
-    overviewSystemPrompt(config.language),
-    `${source}\n\nHeadline: ${headline}`,
-    Math.min(config.maxTokens, 512),
-    (value) => shortOverview(value, headline)
-  );
-  return { headline, overview };
+  try {
+    return parseTodayBrief(await request(config, systemPrompt, source, Math.min(config.maxTokens, 512)));
+  } catch (error) {
+    console.log(
+      `[summary] Retrying Today Brief after failure: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return parseTodayBrief(
+      await request(
+        config,
+        systemPrompt,
+        `${source}\n\nCorrection: Return exactly the two labeled lines within the stated limits.`,
+        Math.min(config.maxTokens, 512)
+      )
+    );
+  }
 }
 
 async function generatePaperBrief(
@@ -407,8 +372,9 @@ export function createOpenAIEditorialSummarizer(config: SummaryConfig): Summariz
       throw new Error("Cannot generate an editorial digest without papers.");
     }
 
-    const request = createGenerationRequestLimiter(GENERATION_REQUEST_CONCURRENCY);
-    const todayBriefPromise = generateTodayBrief(request, config, papers, interestClusters)
+    const briefRequest = createGenerationRequestLimiter(1);
+    const paperRequest = createGenerationRequestLimiter(PAPER_TLDR_CONCURRENCY);
+    const todayBriefPromise = generateTodayBrief(briefRequest, config, papers, interestClusters)
       .catch((error) => {
         console.log(
           `[summary] Today Brief generation failed; keeping paper TLDRs: ${
@@ -422,7 +388,7 @@ export function createOpenAIEditorialSummarizer(config: SummaryConfig): Summariz
       PAPER_TLDR_CONCURRENCY,
       async (paper) => {
         try {
-          return await generatePaperBrief(request, config, paper);
+          return await generatePaperBrief(paperRequest, config, paper);
         } catch (error) {
           console.log(
             `[summary] TLDR generation failed for "${paper.title}" after retry: ${

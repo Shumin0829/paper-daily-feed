@@ -40,10 +40,19 @@ function systemPrompt(requestBody: string): string {
   return payload.messages[0]?.content ?? "";
 }
 
+function userPrompt(requestBody: string): string {
+  const payload = JSON.parse(requestBody) as { messages: Array<{ content: string }> };
+  return payload.messages[1]?.content ?? "";
+}
+
+function isBriefRequest(requestBody: string): boolean {
+  return systemPrompt(requestBody).includes("compact editorial brief");
+}
+
 function successfulContent(requestBody: string): string {
-  const prompt = systemPrompt(requestBody);
-  if (prompt.includes("subject–verb–object phrase")) return responseDigest.headline;
-  if (prompt.includes("concise editorial sentence")) return responseDigest.overview;
+  if (isBriefRequest(requestBody)) {
+    return `Headline: ${responseDigest.headline}\nOverview: ${responseDigest.overview}`;
+  }
   return responseDigest.tldr;
 }
 
@@ -60,18 +69,11 @@ describe("createOpenAIEditorialSummarizer", () => {
     mock.restore();
   });
 
-  it("generates the Today Brief as headline and content before paper TLDRs", async () => {
+  it("generates the Today Brief with one compact request alongside paper TLDRs", async () => {
     const requestKinds: string[] = [];
     const fetchMock = mock(async (_url: string, init?: RequestInit) => {
       const body = String(init?.body);
-      const prompt = systemPrompt(body);
-      requestKinds.push(
-        prompt.includes("subject–verb–object phrase")
-          ? "headline"
-          : prompt.includes("concise editorial sentence")
-            ? "overview"
-            : "tldr"
-      );
+      requestKinds.push(isBriefRequest(body) ? "brief" : "tldr");
       return generationResponse(successfulContent(body));
     });
     stubFetch(fetchMock);
@@ -85,36 +87,27 @@ describe("createOpenAIEditorialSummarizer", () => {
       },
       papers: [{ tldr: responseDigest.tldr }]
     });
-    expect(requestKinds).toEqual(["headline", "tldr", "overview"]);
+    expect(requestKinds).toEqual(["brief", "tldr"]);
     const requestBodies = fetchMock.mock.calls.map((call) => String(call[1]?.body));
-    const briefBodies = requestBodies.filter((body) => !systemPrompt(body).includes("paper summary"));
-    const headlineBody = requestBodies.find((body) =>
-      systemPrompt(body).includes("subject–verb–object phrase")
-    );
-    const overviewBody = requestBodies.find((body) =>
-      systemPrompt(body).includes("concise editorial sentence")
-    );
+    const briefBodies = requestBodies.filter(isBriefRequest);
+    const briefBody = briefBodies[0];
     const tldrBody = requestBodies.find((body) => systemPrompt(body).includes("paper summary"));
-    expect(headlineBody).not.toContain("Reader interest clusters");
-    expect(headlineBody).not.toContain("Abstract:");
-    expect(headlineBody).toContain("Title: Urban mobility");
-    expect(overviewBody).toContain("Cluster 1: urban mobility; transport equity");
-    expect(briefBodies.every((body) => !body.includes("Return only one JSON object"))).toBeTrue();
+    expect(briefBody).toContain("Recommended paper 1");
+    expect(briefBody).toContain("Title: Urban mobility");
+    expect(briefBody).toContain("Abstract: A paper about network structure");
+    expect(briefBody).not.toContain("Reader interest clusters");
     expect(briefBodies.every((body) => body.includes('\"max_tokens\":512'))).toBeTrue();
     expect(tldrBody).toContain('\"max_tokens\":2048');
 
-    const prompts = requestBodies.map(systemPrompt);
-    expect(prompts.every((prompt) => prompt.length < 240)).toBeTrue();
-    expect(prompts.every((prompt) => !/\b(?:do not|don't|never)\b/iu.test(prompt))).toBeTrue();
-    expect(prompts.find((prompt) => prompt.includes("subject–verb–object phrase"))).toContain(
-      "most significant candidate"
-    );
-    expect(prompts.find((prompt) => prompt.includes("subject–verb–object phrase"))).toContain(
-      "10 English words or 14 Chinese characters"
-    );
-    expect(prompts.find((prompt) => prompt.includes("concise editorial sentence"))).toContain(
-      "strongest one or two source insights"
-    );
+    const prompt = systemPrompt(briefBody!);
+    expect(prompt.length).toBeLessThan(500);
+    expect(prompt).toContain("Read every recommended paper");
+    expect(prompt).toContain("domain knowledge");
+    expect(prompt).toContain("one standout insight");
+    expect(prompt).toContain("a meaningful connection among a few");
+    expect(prompt).toContain("Coverage is not a goal");
+    expect(prompt).toContain("Headline:");
+    expect(prompt).toContain("Overview:");
   });
 
   it("generates paper TLDRs concurrently with a bounded request count", async () => {
@@ -153,49 +146,51 @@ describe("createOpenAIEditorialSummarizer", () => {
     expect((await resultPromise).papers).toHaveLength(manyPapers.length);
   });
 
-  it("lets the model choose the most important headline candidate", async () => {
-    const secondPaper = {
+  it("lets the editor consider every recommendation without sending full long abstracts", async () => {
+    const manyPapers = Array.from({ length: 5 }, (_, index) => ({
       ...papers[0]!,
-      title: "Large language models do not have emotions",
-      abstract: "Language models can imitate emotional language without experiencing emotions.",
-      url: "https://example.test/second-paper"
-    };
+      title: `Ranked paper ${index + 1}`,
+      abstract: `${index + 1}:` + "x".repeat(2_000),
+      url: `https://example.test/ranked-${index + 1}`
+    }));
     const fetchMock = mock(async (_url: string, init?: RequestInit) =>
       generationResponse(successfulContent(String(init?.body)))
     );
     stubFetch(fetchMock);
 
-    await createOpenAIEditorialSummarizer(summaryConfig)([papers[0]!, secondPaper], clusters);
+    await createOpenAIEditorialSummarizer(summaryConfig)(manyPapers, clusters);
 
     const requestBodies = fetchMock.mock.calls.map((call) => String(call[1]?.body));
-    const headlineBody = requestBodies.find((body) =>
-      systemPrompt(body).includes("subject–verb–object phrase")
-    );
-    const overviewBody = requestBodies.find((body) =>
-      systemPrompt(body).includes("concise editorial sentence")
-    );
-    expect(headlineBody).toContain("Candidate 1");
-    expect(headlineBody).toContain("Urban mobility");
-    expect(headlineBody).toContain("Candidate 2");
-    expect(headlineBody).toContain(secondPaper.title);
-    expect(headlineBody).not.toContain(secondPaper.abstract);
-    expect(overviewBody).toContain(secondPaper.title);
+    const briefBody = requestBodies.find(isBriefRequest)!;
+    const source = userPrompt(briefBody);
+    expect(source).toContain("Reader interests: urban mobility; transport equity");
+    expect(source).toContain("Recommended paper 1");
+    expect(source).toContain("Ranked paper 1");
+    expect(source).toContain("Recommended paper 2");
+    expect(source).toContain("Ranked paper 2");
+    expect(source).toContain("Recommended paper 3");
+    expect(source).toContain("Ranked paper 3");
+    expect(source).toContain("Recommended paper 4");
+    expect(source).toContain("Ranked paper 4");
+    expect(source).toContain("Recommended paper 5");
+    expect(source).toContain("Ranked paper 5");
+    expect(source).not.toContain(manyPapers[0]!.abstract);
+    expect(source.length).toBeLessThan(7_000);
   });
 
   it("starts paper TLDRs without waiting for the Today Brief", async () => {
-    let releaseHeadline: (() => void) | undefined;
-    const headlineGate = new Promise<void>((resolve) => {
-      releaseHeadline = resolve;
+    let releaseBrief: (() => void) | undefined;
+    const briefGate = new Promise<void>((resolve) => {
+      releaseBrief = resolve;
     });
     let tldrStarted = false;
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
-        const prompt = systemPrompt(body);
-        if (prompt.includes("subject–verb–object phrase")) {
-          await headlineGate;
+        if (isBriefRequest(body)) {
+          await briefGate;
         }
-        if (prompt.includes("paper summary")) {
+        if (systemPrompt(body).includes("paper summary")) {
           tldrStarted = true;
         }
         return generationResponse(successfulContent(body));
@@ -204,11 +199,11 @@ describe("createOpenAIEditorialSummarizer", () => {
 
     const resultPromise = createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const startedBeforeHeadlineCompleted = tldrStarted;
-    releaseHeadline?.();
+    const startedBeforeBriefCompleted = tldrStarted;
+    releaseBrief?.();
     await resultPromise;
 
-    expect(startedBeforeHeadlineCompleted).toBeTrue();
+    expect(startedBeforeBriefCompleted).toBeTrue();
   });
 
   it("limits total concurrent generation requests across the digest", async () => {
@@ -242,13 +237,16 @@ describe("createOpenAIEditorialSummarizer", () => {
     expect(observedPeak).toBeLessThanOrEqual(4);
   });
 
-  it("keeps successful TLDRs when a Today Brief field fails twice", async () => {
+  it("keeps successful TLDRs when the Today Brief fails twice", async () => {
+    let briefRequests = 0;
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
-        return systemPrompt(body).includes("subject–verb–object phrase")
-          ? generationResponse("", 503)
-          : generationResponse(successfulContent(body));
+        if (isBriefRequest(body)) {
+          briefRequests += 1;
+          return generationResponse("", 503);
+        }
+        return generationResponse(successfulContent(body));
       })
     );
 
@@ -256,6 +254,7 @@ describe("createOpenAIEditorialSummarizer", () => {
 
     expect(result.todayBrief).toBeNull();
     expect(result.papers).toEqual([{ tldr: responseDigest.tldr }]);
+    expect(briefRequests).toBe(2);
   });
 
   it("keeps the Today Brief when one paper TLDR fails twice", async () => {
@@ -301,16 +300,16 @@ describe("createOpenAIEditorialSummarizer", () => {
   });
 
   it("retries an overview that exposes source scaffolding", async () => {
-    let overviewRequests = 0;
+    let briefRequests = 0;
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
-        if (systemPrompt(body).includes("concise editorial sentence")) {
-          overviewRequests += 1;
+        if (isBriefRequest(body)) {
+          briefRequests += 1;
           return generationResponse(
-            overviewRequests === 1
-              ? "该标题对应论文0，此外 Paper 1 讨论另一个主题。"
-              : responseDigest.overview
+            briefRequests === 1
+              ? `Headline: ${responseDigest.headline}\nOverview: 该标题对应论文0，此外 Paper 1 讨论另一个主题。`
+              : successfulContent(body)
           );
         }
         return generationResponse(successfulContent(body));
@@ -319,19 +318,21 @@ describe("createOpenAIEditorialSummarizer", () => {
 
     const result = await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
 
-    expect(overviewRequests).toBe(2);
+    expect(briefRequests).toBe(2);
     expect(result.todayBrief?.overview).toBe(responseDigest.overview);
   });
 
   it("retries an overview that is too long", async () => {
-    let overviewRequests = 0;
+    let briefRequests = 0;
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
-        if (systemPrompt(body).includes("concise editorial sentence")) {
-          overviewRequests += 1;
+        if (isBriefRequest(body)) {
+          briefRequests += 1;
           return generationResponse(
-            overviewRequests === 1 ? "城市交通".repeat(11) : responseDigest.overview
+            briefRequests === 1
+              ? `Headline: ${responseDigest.headline}\nOverview: ${"城市交通".repeat(11)}`
+              : successfulContent(body)
           );
         }
         return generationResponse(successfulContent(body));
@@ -340,22 +341,18 @@ describe("createOpenAIEditorialSummarizer", () => {
 
     const result = await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
 
-    expect(overviewRequests).toBe(2);
+    expect(briefRequests).toBe(2);
     expect(result.todayBrief?.overview).toBe(responseDigest.overview);
   });
 
-  it("retries a short overview that lists other papers", async () => {
-    let overviewRequests = 0;
+  it("allows natural continuity between the headline and overview", async () => {
+    let briefRequests = 0;
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
-        if (systemPrompt(body).includes("concise editorial sentence")) {
-          overviewRequests += 1;
-          return generationResponse(
-            overviewRequests === 1
-              ? "交通扩展改变城市出行；此外，其他研究讨论语言模型与深度学习。"
-              : responseDigest.overview
-          );
+        if (isBriefRequest(body)) {
+          briefRequests += 1;
+          return generationResponse("Headline: 空间结构进入城市预测核心\nOverview: 空间结构进入城市预测核心阶段。");
         }
         return generationResponse(successfulContent(body));
       })
@@ -363,44 +360,21 @@ describe("createOpenAIEditorialSummarizer", () => {
 
     const result = await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
 
-    expect(overviewRequests).toBe(2);
-    expect(result.todayBrief?.overview).toBe(responseDigest.overview);
-  });
-
-  it("retries an overview that repeats the headline", async () => {
-    let overviewRequests = 0;
-    stubFetch(
-      mock(async (_url: string, init?: RequestInit) => {
-        const body = String(init?.body);
-        if (systemPrompt(body).includes("concise editorial sentence")) {
-          overviewRequests += 1;
-          return generationResponse(
-            overviewRequests === 1
-              ? "空间结构进入城市预测核心阶段。"
-              : responseDigest.overview
-          );
-        }
-        return generationResponse(successfulContent(body));
-      })
-    );
-
-    const result = await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
-
-    expect(overviewRequests).toBe(2);
-    expect(result.todayBrief?.overview).toBe(responseDigest.overview);
+    expect(briefRequests).toBe(1);
+    expect(result.todayBrief?.overview).toBe("空间结构进入城市预测核心阶段。");
   });
 
   it("retries an editorial headline that is too long", async () => {
-    let headlineRequests = 0;
+    let briefRequests = 0;
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
-        if (systemPrompt(body).includes("subject–verb–object phrase")) {
-          headlineRequests += 1;
+        if (isBriefRequest(body)) {
+          briefRequests += 1;
           return generationResponse(
-            headlineRequests === 1
-              ? "多模式交通扩展如何重塑城市移动？"
-              : responseDigest.headline
+            briefRequests === 1
+              ? `Headline: 多模式交通扩展如何重塑城市移动？\nOverview: ${responseDigest.overview}`
+              : successfulContent(body)
           );
         }
         return generationResponse(successfulContent(body));
@@ -409,21 +383,21 @@ describe("createOpenAIEditorialSummarizer", () => {
 
     const result = await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
 
-    expect(headlineRequests).toBe(2);
+    expect(briefRequests).toBe(2);
     expect(result.todayBrief?.headline).toBe(responseDigest.headline);
   });
 
   it("allows up to ten English headline words", async () => {
-    let headlineRequests = 0;
+    let briefRequests = 0;
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
-        if (systemPrompt(body).includes("subject–verb–object phrase")) {
-          headlineRequests += 1;
+        if (isBriefRequest(body)) {
+          briefRequests += 1;
           return generationResponse(
-            headlineRequests === 1
-              ? "Urban transport networks reveal causal changes across rapidly growing megacity mobility"
-              : "Transport networks reshape megacity mobility"
+            briefRequests === 1
+              ? `Headline: Urban transport networks reveal causal changes across rapidly growing megacity mobility\nOverview: ${responseDigest.overview}`
+              : `Headline: Transport networks reshape megacity mobility\nOverview: ${responseDigest.overview}`
           );
         }
         return generationResponse(successfulContent(body));
@@ -432,18 +406,18 @@ describe("createOpenAIEditorialSummarizer", () => {
 
     const result = await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
 
-    expect(headlineRequests).toBe(2);
+    expect(briefRequests).toBe(2);
     expect(result.todayBrief?.headline).toBe("Transport networks reshape megacity mobility");
   });
 
   it("accepts a compact thirteen-character Chinese headline", async () => {
-    let headlineRequests = 0;
+    let briefRequests = 0;
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
-        if (systemPrompt(body).includes("subject–verb–object phrase")) {
-          headlineRequests += 1;
-          return generationResponse("多模式网络扩展影响城市出行");
+        if (isBriefRequest(body)) {
+          briefRequests += 1;
+          return generationResponse(`Headline: 多模式网络扩展影响城市出行\nOverview: ${responseDigest.overview}`);
         }
         return generationResponse(successfulContent(body));
       })
@@ -451,7 +425,7 @@ describe("createOpenAIEditorialSummarizer", () => {
 
     const result = await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
 
-    expect(headlineRequests).toBe(1);
+    expect(briefRequests).toBe(1);
     expect(result.todayBrief?.headline).toBe("多模式网络扩展影响城市出行");
   });
 
@@ -460,8 +434,8 @@ describe("createOpenAIEditorialSummarizer", () => {
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
         return generationResponse(
-          systemPrompt(body).includes("subject–verb–object phrase")
-            ? "Today’s papers reveal a shared direction"
+          isBriefRequest(body)
+            ? `Headline: Today’s papers reveal a shared direction\nOverview: ${responseDigest.overview}`
             : successfulContent(body)
         );
       })
