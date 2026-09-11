@@ -41,7 +41,7 @@ function mergeCrossrefMetadata<TPaper extends FeedPaper>(paper: TPaper, metadata
     ...paper,
     doi: metadata.doi,
     title: metadata.title ?? paper.title,
-    journal: metadata.journal ?? paper.journal,
+    journal: paper.journal,
     abstract: hasMeaningfulAbstract(metadata.abstract) ? metadata.abstract : paper.abstract,
     publishedAt: metadata.publishedAt ?? paper.publishedAt,
     ...(metadata.authors?.length ? { authors: metadata.authors } : {}),

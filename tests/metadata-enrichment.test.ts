@@ -17,7 +17,7 @@ function paper(overrides: Partial<FeedPaper> = {}): FeedPaper {
 }
 
 describe("metadata enrichment", () => {
-  it("uses Crossref metadata to supplement and correct RSS paper fields", async () => {
+  it("uses Crossref metadata without replacing the configured journal label", async () => {
     const fetchCrossref = mock(async () => ({
       doi: "10.1080/24694452.2025.2592754",
       title: "Crossref title",
@@ -38,7 +38,7 @@ describe("metadata enrichment", () => {
     expect(fetchCrossref).toHaveBeenCalledWith("10.1080/24694452.2025.2592754");
     expect(enriched).toEqual([
       {
-        journal: "Annals of the American Association of Geographers",
+        journal: "AAAG",
         title: "Crossref title",
         abstract: "Crossref abstract with enough detail to replace the RSS description.",
         url: "https://www.tandfonline.com/doi/full/10.1080/24694452.2025.2592754?af=R",
@@ -154,6 +154,7 @@ describe("selected recommendation abstract enrichment", () => {
   it("uses an exact DOI match to replace authors and first affiliation even when the abstract exists", async () => {
     const fetchCrossref = mock(async () => ({
       doi: "10.1080/13658816.2026.2613291",
+      journal: "International Journal of Geographical Information Science",
       authors: [
         "Aneesha Fernando",
         "Surangika Ranathunga",
@@ -179,6 +180,7 @@ describe("selected recommendation abstract enrichment", () => {
 
     expect(fetchCrossref).toHaveBeenCalledWith("10.1080/13658816.2026.2613291");
     expect(enriched).toMatchObject({
+      journal: "AAAG",
       abstract: selected.abstract,
       authors: [
         "Aneesha Fernando",
