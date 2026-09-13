@@ -31,7 +31,14 @@ describe("renderEmail", () => {
     expect(html).toContain("Nature Cities");
     expect(html).toContain("2026-04-28");
     expect(html).toContain("Nature Cities · 2026-04-28");
-    expect(html).toContain('class="accent" style="margin: 0 0 8px 0; color: #007aff;');
+    expect(html).toContain('class="journal-meta accent" style="margin: 14px 0 0 0; color: #007aff;');
+    const item = html.match(/<a class="paper-inner"[^>]*>([\s\S]*?)<\/a>/)?.[1] ?? "";
+    expect(item).toContain("Transit accessibility improves climate resilience");
+    expect(item).not.toContain("<a ");
+    expect(item.indexOf("paper-copy")).toBeLessThan(item.indexOf("Ada Lovelace"));
+    expect(item.indexOf("Match score")).toBeLessThan(item.indexOf("Nature Cities"));
+    expect(item.trim()).toEndWith("Nature Cities · 2026-04-28</p>");
+    expect(html).toContain('.paper-card, [data-ogsc] .paper-card { background: transparent !important; }');
     expect(html).not.toContain("01 · Nature Cities");
     expect(html).toContain("Ada Lovelace, Grace Hopper");
     expect(html).toContain("Example University");
@@ -47,8 +54,8 @@ describe("renderEmail", () => {
     expect(html).not.toContain("Matched your interests");
     expect(html).not.toContain("Urban mobility and climate adaptation");
     expect(html).toContain('class="paper-card"');
-    expect(html).toContain('style="padding: 0 0 32px 0;"');
-    expect(html).toContain('class="paper-pad" style="padding: 0 20px;');
+    expect(html).toContain('style="padding: 0 0 36px 0;"');
+    expect(html).toContain('class="paper-pad" style="padding: 0 28px;');
     expect(html).not.toContain("border: 1px solid #d9ebff");
     expect(html).not.toContain("border-radius: 18px");
     expect(html).not.toContain("lead-paper");
@@ -226,7 +233,7 @@ describe("renderEmail", () => {
       "论文联合建模连续空间与交通网络以预测城市出行。实验覆盖多个城市，以比较模型的迁移能力。"
     );
     expect(editorialHtml).toContain(
-      'class="paper-copy text-primary" style="margin: 16px 0 0 0; color: #1d1d1f; font-size: 17px; line-height: 1.5;">论文联合建模连续空间与交通网络以预测城市出行。'
+      'class="paper-copy text-primary" style="margin: 12px 0 0 0; color: #1d1d1f; font-size: 17px; line-height: 1.6;">论文联合建模连续空间与交通网络以预测城市出行。'
     );
     expect(editorialHtml).not.toContain("它对应城市出行研究");
     expect(editorialHtml).not.toContain("Why it fits&nbsp;&mdash;");

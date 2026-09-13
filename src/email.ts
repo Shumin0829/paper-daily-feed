@@ -115,7 +115,7 @@ function renderEditorial(brief: TodayBrief): string {
 function renderMetaLine(paper: RenderablePaper): string {
   const date = formatDate(paper.publishedAt);
   const values = [paper.journal, date].filter(Boolean);
-  return `<p class="accent" style="margin: 0 0 8px 0; color: #007aff; font-size: 14px; font-weight: 700; line-height: 1.4; letter-spacing: 0.08em; text-transform: uppercase; overflow-wrap: anywhere; word-break: break-word;">${escapeHtml(
+  return `<p class="journal-meta accent" style="margin: 14px 0 0 0; color: #007aff; font-size: 14px; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; word-break: break-word;">${escapeHtml(
     values.join(" · ")
   )}</p>`;
 }
@@ -142,7 +142,7 @@ function renderRecommendationScore(paper: RenderablePaper): string {
 
 function renderBrief(brief: PaperBrief | undefined, paper: RenderablePaper): string {
   if (brief) {
-    return `<p${languageAttribute(brief.tldr)} class="paper-copy text-primary" style="margin: 16px 0 0 0; color: #1d1d1f; font-size: 17px; line-height: 1.5;">${escapeHtml(
+    return `<p${languageAttribute(brief.tldr)} class="paper-copy text-primary" style="margin: 12px 0 0 0; color: #1d1d1f; font-size: 17px; line-height: 1.6;">${escapeHtml(
       ensureSentenceEnding(brief.tldr)
     )}</p>`;
   }
@@ -150,27 +150,31 @@ function renderBrief(brief: PaperBrief | undefined, paper: RenderablePaper): str
   const fallback = hasMeaningfulAbstract(paper.abstract)
     ? truncateText(paper.abstract, ABSTRACT_EXCERPT_LIMIT)
     : "No abstract provided.";
-  return `<p${languageAttribute(fallback)} class="paper-copy text-secondary" style="margin: 16px 0 0 0; color: #424245; font-size: 17px; line-height: 1.5;">${escapeHtml(
+  return `<p${languageAttribute(fallback)} class="paper-copy text-secondary" style="margin: 12px 0 0 0; color: #424245; font-size: 17px; line-height: 1.6;">${escapeHtml(
     ensureSentenceEnding(fallback)
   )}</p>`;
 }
 
 function renderPaper(paper: RenderablePaper, brief?: PaperBrief): string {
   return `<tr>
-            <td style="padding: 0 0 32px 0;">
+            <td style="padding: 0 0 36px 0;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="paper-card" style="width: 100%; table-layout: fixed; background: #ffffff; border-collapse: separate;">
                 <tr>
-                  <td class="paper-pad" style="padding: 0 20px; overflow-wrap: anywhere; word-break: break-word;">
-                    ${renderMetaLine(paper)}
-                    <h2 class="paper-title" style="margin: 0 0 10px 0; font-size: 22px; line-height: 1.3; font-weight: 700; letter-spacing: 0; overflow-wrap: anywhere; word-break: break-word;">
-                      <a class="text-primary" href="${escapeHtml(paper.url)}" style="color: #1d1d1f; text-decoration: none;">${escapeHtml(
+                  <td class="paper-pad" style="padding: 0 28px; overflow-wrap: anywhere; word-break: break-word;">
+                    <a class="paper-inner" href="${escapeHtml(paper.url)}" style="display: block; padding: 8px 0; color: inherit; text-decoration: none;">
+                    <h2 class="paper-title" style="margin: 0; font-size: 22px; line-height: 1.3; font-weight: 700; letter-spacing: 0; overflow-wrap: anywhere; word-break: break-word;">
+                      <span class="text-primary" style="color: #1d1d1f;">${escapeHtml(
                         paper.title
-                      )}</a>
+                      )}</span>
                     </h2>
-                    ${renderAuthors(paper)}
-                    ${renderAffiliation(paper)}
                     ${renderBrief(brief, paper)}
-                    ${renderRecommendationScore(paper)}
+                    <div class="paper-details" style="margin-top: 18px;">
+                      ${renderAuthors(paper)}
+                      ${renderAffiliation(paper)}
+                      ${renderRecommendationScore(paper)}
+                    </div>
+                    ${renderMetaLine(paper)}
+                    </a>
                   </td>
                 </tr>
               </table>
@@ -206,17 +210,20 @@ export function renderEmail(
     <title>Daily Paper Feeds</title>
     <style>
       ${SHARED_EMAIL_STYLES}
+      .paper-card, [data-ogsc] .paper-card { background: transparent !important; }
+      .paper-inner:focus-visible { outline: 2px solid #007aff; outline-offset: 6px; }
+      .paper-details p { line-height: 1.5 !important; }
       @media only screen and (max-width: 680px) {
         .page-pad { padding: 24px 10px !important; }
         .email-shell { width: 100% !important; max-width: 100% !important; table-layout: fixed !important; }
-        .header-pad { padding: 8px 18px 22px 18px !important; }
-        .closing-pad { padding-left: 18px !important; padding-right: 18px !important; }
+        .header-pad { padding: 24px 20px !important; }
+        .closing-pad { padding-left: 20px !important; padding-right: 20px !important; }
         .editorial-copy { padding-left: 0 !important; padding-right: 0 !important; }
-        .paper-pad { padding-left: 18px !important; padding-right: 18px !important; }
+        .paper-pad { padding-left: 20px !important; padding-right: 20px !important; }
       }
       @media only screen and (min-width: 600px) {
         .paper-title { font-size: 24px !important; }
-        .paper-copy, .editorial-overview { font-size: 18px !important; }
+        .editorial-overview { font-size: 18px !important; }
       }
     </style>
   </head>
@@ -229,14 +236,14 @@ export function renderEmail(
         <td align="center" class="page-pad" style="padding: 34px 16px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #1d1d1f;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" align="center" class="email-shell" style="width: 100%; max-width: ${EMAIL_WIDTH}px; table-layout: fixed; border-collapse: collapse;">
             <tr>
-              <td class="header-pad" style="padding: 10px 20px 26px 20px;">
+              <td class="header-pad" style="padding: 28px 28px 24px 28px;">
                 ${renderBrand(now)}
                 ${digest?.todayBrief ? renderEditorial(digest.todayBrief) : ""}
               </td>
             </tr>
             ${content}
             <tr>
-              <td align="left" style="padding: ${romance ? "10px" : "18px"} 20px 4px 20px; text-align: left; color: #86868b; font-size: 14px; line-height: 1.5;" class="closing-pad text-tertiary">
+              <td align="left" style="padding: 0 28px 28px; text-align: left; color: #86868b; font-size: 14px; line-height: 1.5;" class="closing-pad text-tertiary">
                 ${romance ? renderRomance(romance) : ""}
                 <div style="height: ${romance ? "28px" : "0"}; font-size: 0; line-height: 0;">&nbsp;</div>
                 ${renderSharedEmailFooter()}
