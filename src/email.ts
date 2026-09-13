@@ -115,9 +115,9 @@ function renderEditorial(brief: TodayBrief): string {
 function renderMetaLine(paper: RenderablePaper): string {
   const date = formatDate(paper.publishedAt);
   const values = [paper.journal, date].filter(Boolean);
-  return `<p class="journal-meta accent" style="margin: 14px 0 0 0; color: #007aff; font-size: 14px; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; word-break: break-word;">${escapeHtml(
+  return `<p class="journal-meta accent" style="margin: 14px 0 0 0; color: #007aff; font-size: 14px; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; word-break: break-word;"><a class="accent" href="${escapeHtml(paper.url)}" style="color: #007aff; text-decoration: none;">${escapeHtml(
     values.join(" · ")
-  )}</p>`;
+  )}</a></p>`;
 }
 
 function renderAuthors(paper: RenderablePaper): string {
@@ -161,11 +161,11 @@ function renderPaper(paper: RenderablePaper, brief?: PaperBrief): string {
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="paper-card" style="width: 100%; table-layout: fixed; background: #ffffff; border-collapse: separate;">
                 <tr>
                   <td class="paper-pad" style="padding: 0 28px; overflow-wrap: anywhere; word-break: break-word;">
-                    <a class="paper-inner" href="${escapeHtml(paper.url)}" style="display: block; padding: 8px 0; color: inherit; text-decoration: none;">
+                    <div class="paper-inner" style="padding: 8px 0;">
                     <h2 class="paper-title" style="margin: 0; font-size: 22px; line-height: 1.3; font-weight: 700; letter-spacing: 0; overflow-wrap: anywhere; word-break: break-word;">
-                      <span class="text-primary" style="color: #1d1d1f;">${escapeHtml(
+                      <a class="text-primary" href="${escapeHtml(paper.url)}" style="color: #1d1d1f; text-decoration: none;">${escapeHtml(
                         paper.title
-                      )}</span>
+                      )}</a>
                     </h2>
                     ${renderBrief(brief, paper)}
                     <div class="paper-details" style="margin-top: 18px;">
@@ -174,7 +174,7 @@ function renderPaper(paper: RenderablePaper, brief?: PaperBrief): string {
                       ${renderRecommendationScore(paper)}
                     </div>
                     ${renderMetaLine(paper)}
-                    </a>
+                    </div>
                   </td>
                 </tr>
               </table>
@@ -211,7 +211,7 @@ export function renderEmail(
     <style>
       ${SHARED_EMAIL_STYLES}
       .paper-card, [data-ogsc] .paper-card { background: transparent !important; }
-      .paper-inner:focus-visible { outline: 2px solid #007aff; outline-offset: 6px; }
+      .paper-inner a:focus-visible { outline: 2px solid #007aff; outline-offset: 6px; }
       .paper-details p { line-height: 1.5 !important; }
       @media only screen and (max-width: 680px) {
         .page-pad { padding: 24px 10px !important; }

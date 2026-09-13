@@ -32,12 +32,18 @@ describe("renderEmail", () => {
     expect(html).toContain("2026-04-28");
     expect(html).toContain("Nature Cities · 2026-04-28");
     expect(html).toContain('class="journal-meta accent" style="margin: 14px 0 0 0; color: #007aff;');
-    const item = html.match(/<a class="paper-inner"[^>]*>([\s\S]*?)<\/a>/)?.[1] ?? "";
+    const item = html.match(/<td class="paper-pad"[^>]*>([\s\S]*?)<\/td>/)?.[1] ?? "";
     expect(item).toContain("Transit accessibility improves climate resilience");
-    expect(item).not.toContain("<a ");
+    const links = [...item.matchAll(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
+    expect(links.map((link) => link[1])).toEqual([papers[0]!.url, papers[0]!.url]);
+    expect(links.map((link) => link[2]?.trim())).toEqual([
+      papers[0]!.title,
+      "Nature Cities · 2026-04-28"
+    ]);
+    expect(item).not.toContain('<a class="paper-inner"');
     expect(item.indexOf("paper-copy")).toBeLessThan(item.indexOf("Ada Lovelace"));
     expect(item.indexOf("Match score")).toBeLessThan(item.indexOf("Nature Cities"));
-    expect(item.trim()).toEndWith("Nature Cities · 2026-04-28</p>");
+    expect(item).toContain("Nature Cities · 2026-04-28</a></p>");
     expect(html).toContain('.paper-card, [data-ogsc] .paper-card { background: transparent !important; }');
     expect(html).not.toContain("01 · Nature Cities");
     expect(html).toContain("Ada Lovelace, Grace Hopper");
