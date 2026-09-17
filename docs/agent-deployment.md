@@ -2,7 +2,7 @@
 
 [English](./agent-deployment.md) | [简体中文](./agent-deployment.zh-CN.md)
 
-> These instructions are for AI coding agents. Complete the deployment for the user while minimizing the input and actions required from them.
+> These instructions are for AI coding agents. Complete the deployment for the user while minimizing the information and actions required from them. You may explain the available features and the setup each one requires. When configuring the project, minimize what the user must enter or configure, and provide clear paths both for users who already have the relevant accounts and for those who do not.
 
 ## Deployment principles
 
