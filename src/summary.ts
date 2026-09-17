@@ -4,10 +4,12 @@ import type { InterestClusterSummary, RecommendedPaper } from "./types.js";
 
 const MAX_ABSTRACT_INPUT_LENGTH = 4_000;
 const MAX_BRIEF_ABSTRACT_INPUT_LENGTH = 800;
-const GENERATION_CONCURRENCY = 3;
+const MAX_PAPER_TLDR_TOKENS = 256;
+const MAX_TITLE_TRANSLATION_TOKENS = 128;
 const GENERATION_ATTEMPTS = 3;
 const GENERATION_RETRY_BASE_DELAY_MS = 250;
-const GENERATION_REQUEST_TIMEOUT_MS = 60_000;
+const TODAY_BRIEF_POLICY = { timeoutMs: 300_000, reasoningEffort: "medium" } as const;
+const PAPER_BRIEF_POLICY = { timeoutMs: 120_000, reasoningEffort: "none" } as const;
 const MAX_HEADLINE_CJK_UNITS = 18;
 const MAX_HEADLINE_WORDS = 10;
 const MAX_OVERVIEW_CJK_UNITS = 42;
@@ -44,6 +46,12 @@ export type SummarizeDigest = (
   papers: RecommendedPaper[],
   interestClusters: InterestClusterSummary[]
 ) => Promise<EditorialDigest>;
+
+type GenerationPolicy = {
+  maxTokens: number;
+  timeoutMs: number;
+  reasoningEffort: "none" | "medium";
+};
 
 function compact(value: string, maxLength = Number.POSITIVE_INFINITY): string {
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -190,26 +198,40 @@ async function requestGeneration(
   config: SummaryConfig,
   systemPrompt: string,
   userPrompt: string,
-  maxTokens = config.maxTokens
+  policy: GenerationPolicy
 ): Promise<string> {
   const endpoint = `${config.baseUrl.replace(/\/$/, "")}/chat/completions`;
-  const response = await fetch(endpoint, {
+  const requestBody = (includeReasoningEffort: boolean) => ({
+    model: config.model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt }
+    ],
+    stream: false,
+    ...(includeReasoningEffort
+      ? { reasoning_effort: policy.reasoningEffort }
+      : { temperature: 0.2 }),
+    ...(policy.maxTokens ? { max_tokens: policy.maxTokens } : {})
+  });
+  const send = (includeReasoningEffort: boolean) => fetch(endpoint, {
     method: "POST",
-    signal: AbortSignal.timeout(GENERATION_REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(policy.timeoutMs),
     headers: {
       Authorization: `Bearer ${config.apiKey.trim()}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      temperature: 0.2,
-      ...(maxTokens ? { max_tokens: maxTokens } : {})
-    })
+    body: JSON.stringify(requestBody(includeReasoningEffort))
   });
+
+  let response = await send(true);
+  if (!response.ok && response.status === 400) {
+    const errorBody = await response.text();
+    if (/reasoning[_\s.-]?effort/iu.test(errorBody)) {
+      response = await send(false);
+    } else {
+      throw new Error(`Generation API request failed (${response.status} ${response.statusText}).`);
+    }
+  }
 
   if (!response.ok) {
     throw new Error(`Generation API request failed (${response.status} ${response.statusText}).`);
@@ -226,24 +248,6 @@ async function requestGeneration(
 }
 
 type GenerationRequest = typeof requestGeneration;
-
-function createGenerationRequestLimiter(maxConcurrent: number): GenerationRequest {
-  let activeRequests = 0;
-  const waiters: Array<() => void> = [];
-
-  return async (...args) => {
-    if (activeRequests >= maxConcurrent) {
-      await new Promise<void>((resolve) => waiters.push(resolve));
-    }
-    activeRequests += 1;
-    try {
-      return await requestGeneration(...args);
-    } finally {
-      activeRequests -= 1;
-      waiters.shift()?.();
-    }
-  };
-}
 
 function outputLanguageInstruction(language: string): string {
   return requestsChinese(language)
@@ -338,7 +342,10 @@ async function generateTodayBrief(
         ? ""
         : `\n\nCorrection: Return the two labeled fields within the stated limits. Both fields must be written in ${config.language}.`;
       return parseTodayBrief(
-        await request(config, systemPrompt, `${source}${correction}`, Math.min(config.maxTokens, 512)),
+        await request(config, systemPrompt, `${source}${correction}`, {
+          ...TODAY_BRIEF_POLICY,
+          maxTokens: Math.min(config.maxTokens, 512)
+        }),
         config.language
       );
     } catch (error) {
@@ -356,20 +363,29 @@ async function generatePaperBrief(
   config: SummaryConfig,
   paper: RecommendedPaper
 ): Promise<PaperBrief> {
-  const systemPrompt = paperBriefSystemPrompt(
-    config.language,
-    hasMeaningfulAbstract(paper.abstract)
-  );
+  const hasAbstract = hasMeaningfulAbstract(paper.abstract);
+  const systemPrompt = paperBriefSystemPrompt(config.language, hasAbstract);
   const source = paperSource(paper);
+  const maxTokens = Math.min(
+    config.maxTokens,
+    hasAbstract ? MAX_PAPER_TLDR_TOKENS : MAX_TITLE_TRANSLATION_TOKENS
+  );
   let lastError: unknown;
   for (let attempt = 0; attempt < GENERATION_ATTEMPTS; attempt += 1) {
     try {
       const correction = attempt === 0
         ? ""
-        : hasMeaningfulAbstract(paper.abstract)
+        : hasAbstract
           ? `\n\nCorrection: Write a valid TLDR grounded in the supplied abstract. It must be written in ${config.language}.`
           : `\n\nCorrection: Write a faithful introduction in fresh wording that stays within the title's stated scope. It must be written in ${config.language}.`;
-      return parsePaperBrief(await request(config, systemPrompt, `${source}${correction}`), paper, config.language);
+      return parsePaperBrief(
+        await request(config, systemPrompt, `${source}${correction}`, {
+          ...PAPER_BRIEF_POLICY,
+          maxTokens
+        }),
+        paper,
+        config.language
+      );
     } catch (error) {
       lastError = error;
       if (attempt === GENERATION_ATTEMPTS - 1) break;
@@ -383,34 +399,19 @@ async function generatePaperBrief(
 }
 
 function unavailablePaperBrief(language: string, paper: RecommendedPaper): PaperBrief {
+  if (!hasMeaningfulAbstract(paper.abstract)) {
+    return {
+      tldr: paper.title,
+      titleOnly: true,
+      unavailable: true
+    };
+  }
+
   const chinese = requestsChinese(language);
   const tldr = chinese
-    ? hasMeaningfulAbstract(paper.abstract)
-      ? "TLDR 暂时生成失败。"
-      : "未提供摘要，TLDR 暂时无法生成。"
-    : hasMeaningfulAbstract(paper.abstract)
-      ? "TLDR generation is temporarily unavailable."
-      : "No abstract was provided, so a TLDR could not be generated.";
+    ? "TLDR 暂时生成失败。"
+    : "TLDR generation is temporarily unavailable.";
   return { tldr, unavailable: true };
-}
-
-async function mapConcurrently<TInput, TOutput>(
-  inputs: TInput[],
-  concurrency: number,
-  transform: (input: TInput) => Promise<TOutput>
-): Promise<TOutput[]> {
-  const output = new Array<TOutput>(inputs.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(Math.max(1, concurrency), inputs.length);
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (nextIndex < inputs.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      output[index] = await transform(inputs[index]!);
-    }
-  });
-  await Promise.all(workers);
-  return output;
 }
 
 export function createOpenAIEditorialSummarizer(config: SummaryConfig): SummarizeDigest {
@@ -422,8 +423,20 @@ export function createOpenAIEditorialSummarizer(config: SummaryConfig): Summariz
       throw new Error("Cannot generate an editorial digest without papers.");
     }
 
-    const generationRequest = createGenerationRequestLimiter(GENERATION_CONCURRENCY);
-    const todayBriefPromise = generateTodayBrief(generationRequest, config, papers, interestClusters)
+    const paperBriefs: PaperBrief[] = [];
+    for (const paper of papers) {
+      try {
+        paperBriefs.push(await generatePaperBrief(requestGeneration, config, paper));
+      } catch (error) {
+        console.log(
+          `[summary] TLDR generation failed for "${paper.title}" after all attempts: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+        paperBriefs.push(unavailablePaperBrief(config.language, paper));
+      }
+    }
+    const todayBrief = await generateTodayBrief(requestGeneration, config, papers, interestClusters)
       .catch((error) => {
         console.log(
           `[summary] Today Brief generation failed; keeping paper TLDRs: ${
@@ -432,24 +445,6 @@ export function createOpenAIEditorialSummarizer(config: SummaryConfig): Summariz
         );
         return null;
       });
-    const paperBriefsPromise = mapConcurrently(
-      papers,
-      GENERATION_CONCURRENCY,
-      async (paper) => {
-        try {
-          return await generatePaperBrief(generationRequest, config, paper);
-        } catch (error) {
-          console.log(
-            `[summary] TLDR generation failed for "${paper.title}" after all attempts: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          );
-          return unavailablePaperBrief(config.language, paper);
-        }
-      }
-    );
-
-    const [todayBrief, paperBriefs] = await Promise.all([todayBriefPromise, paperBriefsPromise]);
 
     return { todayBrief, papers: paperBriefs };
   };

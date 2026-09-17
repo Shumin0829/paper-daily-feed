@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { SummaryConfig } from "../src/app-config.js";
 import { createOpenAIEditorialSummarizer } from "../src/summary.js";
 import type { InterestClusterSummary, RecommendedPaper } from "../src/types.js";
@@ -70,6 +70,7 @@ describe("createOpenAIEditorialSummarizer", () => {
   });
 
   it("generates the Today Brief with one compact request alongside paper TLDRs", async () => {
+    const timeoutSpy = spyOn(AbortSignal, "timeout");
     const requestKinds: string[] = [];
     const fetchMock = mock(async (_url: string, init?: RequestInit) => {
       const body = String(init?.body);
@@ -87,7 +88,7 @@ describe("createOpenAIEditorialSummarizer", () => {
       },
       papers: [{ tldr: responseDigest.tldr }]
     });
-    expect(requestKinds).toEqual(["brief", "tldr"]);
+    expect(requestKinds).toEqual(["tldr", "brief"]);
     const requestBodies = fetchMock.mock.calls.map((call) => String(call[1]?.body));
     const briefBodies = requestBodies.filter(isBriefRequest);
     const briefBody = briefBodies[0];
@@ -97,7 +98,15 @@ describe("createOpenAIEditorialSummarizer", () => {
     expect(briefBody).toContain("Abstract: A paper about network structure");
     expect(briefBody).not.toContain("Reader interest clusters");
     expect(briefBodies.every((body) => body.includes('\"max_tokens\":512'))).toBeTrue();
-    expect(tldrBody).toContain('\"max_tokens\":2048');
+    expect(briefBodies.every((body) => body.includes('\"reasoning_effort\":\"medium\"'))).toBeTrue();
+    expect(tldrBody).toContain('\"max_tokens\":256');
+    expect(tldrBody).toContain('\"reasoning_effort\":\"none\"');
+    expect(requestBodies.every((body) => !body.includes("enable_thinking"))).toBeTrue();
+    expect(requestBodies.every((body) => !body.includes("temperature"))).toBeTrue();
+    expect(timeoutSpy.mock.calls.map((call) => call[0]).sort((left, right) => left - right)).toEqual([
+      120_000,
+      300_000
+    ]);
 
     const prompt = systemPrompt(briefBody!);
     expect(prompt.length).toBeLessThan(900);
@@ -119,7 +128,7 @@ describe("createOpenAIEditorialSummarizer", () => {
     expect(paperPrompt).toContain("Output only the summary sentence");
   });
 
-  it("generates paper TLDRs concurrently with a bounded request count", async () => {
+  it("generates paper TLDRs serially to avoid overloading the reasoning service", async () => {
     const manyPapers = Array.from({ length: 6 }, (_, index) => ({
       ...papers[0]!,
       title: `Paper ${index}`,
@@ -149,8 +158,7 @@ describe("createOpenAIEditorialSummarizer", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(maxActivePaperRequests).toBeGreaterThan(1);
-    expect(maxActivePaperRequests).toBeLessThanOrEqual(4);
+    expect(maxActivePaperRequests).toBe(1);
     releasePaperRequests?.();
     expect((await resultPromise).papers).toHaveLength(manyPapers.length);
   });
@@ -187,32 +195,19 @@ describe("createOpenAIEditorialSummarizer", () => {
     expect(source.length).toBeLessThan(7_000);
   });
 
-  it("starts paper TLDRs without waiting for the Today Brief", async () => {
-    let releaseBrief: (() => void) | undefined;
-    const briefGate = new Promise<void>((resolve) => {
-      releaseBrief = resolve;
-    });
-    let tldrStarted = false;
+  it("finishes essential paper TLDRs before starting the optional Today Brief", async () => {
+    const requestKinds: string[] = [];
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
         const body = String(init?.body);
-        if (isBriefRequest(body)) {
-          await briefGate;
-        }
-        if (systemPrompt(body).includes("paper summary")) {
-          tldrStarted = true;
-        }
+        requestKinds.push(isBriefRequest(body) ? "brief" : "tldr");
         return generationResponse(successfulContent(body));
       })
     );
 
-    const resultPromise = createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const startedBeforeBriefCompleted = tldrStarted;
-    releaseBrief?.();
-    await resultPromise;
+    await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
 
-    expect(startedBeforeBriefCompleted).toBeTrue();
+    expect(requestKinds).toEqual(["tldr", "brief"]);
   });
 
   it("limits total concurrent generation requests across the digest", async () => {
@@ -243,7 +238,7 @@ describe("createOpenAIEditorialSummarizer", () => {
     releaseRequests?.();
     await resultPromise;
 
-    expect(observedPeak).toBeLessThanOrEqual(4);
+    expect(observedPeak).toBe(1);
   });
 
   it("keeps successful TLDRs when the Today Brief fails after all attempts", async () => {
@@ -284,6 +279,31 @@ describe("createOpenAIEditorialSummarizer", () => {
     expect(result.todayBrief?.headline).toBe(responseDigest.headline);
     expect(result.papers[0]).toEqual({ tldr: "TLDR 暂时生成失败。", unavailable: true });
     expect(tldrRequests).toBe(3);
+  });
+
+  it("falls back to the title when a title-only paper cannot be translated", async () => {
+    const titleOnlyPaper = {
+      ...papers[0]!,
+      title: "Identifying amenity mixes associated with demographic-group mobility",
+      abstract: ""
+    };
+    stubFetch(
+      mock(async (_url: string, init?: RequestInit) => {
+        const body = String(init?.body);
+        return systemPrompt(body).includes("paper summary")
+          ? generationResponse("", 503)
+          : generationResponse(successfulContent(body));
+      })
+    );
+
+    const result = await createOpenAIEditorialSummarizer(summaryConfig)([titleOnlyPaper], clusters);
+
+    expect(result.papers[0]).toEqual({
+      tldr: titleOnlyPaper.title,
+      titleOnly: true,
+      unavailable: true
+    });
+    expect(result.papers[0]?.tldr).not.toContain("TLDR 暂时无法生成");
   });
 
   it("retries a Chinese TLDR returned in English", async () => {
@@ -355,10 +375,72 @@ describe("createOpenAIEditorialSummarizer", () => {
     expect(result.papers[0]).toEqual({ tldr: "这篇论文聚焦城市移动性。", titleOnly: true });
     expect(tldrBodies[0]).toContain("Source material: Title only (abstract unavailable)");
     expect(tldrBodies[0]).not.toContain("Abstract:");
+    expect(tldrBodies[0]).toContain('\"max_tokens\":128');
+    expect(tldrBodies[0]).toContain('\"reasoning_effort\":\"none\"');
     expect(systemPrompt(tldrBodies[0]!)).toContain("Translate and concisely restate the title");
     expect(systemPrompt(tldrBodies[0]!)).toContain("Do not infer findings, methods, or context beyond the title");
     expect(systemPrompt(tldrBodies[0]!)).toContain("Do not mention that the abstract is unavailable");
     expect(tldrBodies[1]).toContain("fresh wording that stays within the title's stated scope");
+  });
+
+  it("applies the internal OpenAI reasoning policy per summary task", async () => {
+    const fetchMock = mock(async (_url: string, init?: RequestInit) =>
+      generationResponse(successfulContent(String(init?.body)))
+    );
+    stubFetch(fetchMock);
+
+    await createOpenAIEditorialSummarizer({
+      ...summaryConfig,
+      model: "gpt-4o-mini"
+    })(papers, clusters);
+
+    const requestBodies = fetchMock.mock.calls.map((call) => String(call[1]?.body));
+    expect(requestBodies.every((body) => !body.includes("enable_thinking"))).toBeTrue();
+    const briefRequest = requestBodies.find(isBriefRequest)!;
+    const paperRequest = requestBodies.find((body) => !isBriefRequest(body))!;
+    expect(briefRequest).toContain('\"reasoning_effort\":\"medium\"');
+    expect(paperRequest).toContain('\"reasoning_effort\":\"none\"');
+    const payloads = requestBodies.map((body) => JSON.parse(body) as Record<string, unknown>);
+    expect(payloads.every((payload) => payload.model === "gpt-4o-mini")).toBeTrue();
+    expect(payloads.every((payload) => Array.isArray(payload.messages) && payload.messages.length === 2)).toBeTrue();
+    expect(payloads.every((payload) => payload.stream === false)).toBeTrue();
+    expect(payloads.every((payload) => payload.temperature === undefined)).toBeTrue();
+    expect(payloads.find((payload) => payload.max_tokens === 256)).toBeTruthy();
+    expect(payloads.find((payload) => payload.max_tokens === 512)).toBeTruthy();
+  });
+
+  it("retries without reasoning effort when an OpenAI-compatible model rejects the field", async () => {
+    const fetchMock = mock(async (_url: string, init?: RequestInit) => {
+      const body = String(init?.body);
+      if (body.includes("reasoning_effort")) {
+        return new Response(JSON.stringify({ error: { message: "Unsupported parameter: reasoning_effort" } }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return generationResponse(successfulContent(body));
+    });
+    stubFetch(fetchMock);
+
+    const result = await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
+    const requestBodies = fetchMock.mock.calls.map((call) => String(call[1]?.body));
+
+    expect(result.papers).toEqual([{ tldr: responseDigest.tldr }]);
+    expect(result.todayBrief).not.toBeNull();
+    expect(requestBodies.filter((body) => body.includes("reasoning_effort"))).toHaveLength(2);
+    expect(requestBodies.filter((body) => body.includes('\"temperature\":0.2'))).toHaveLength(2);
+  });
+
+  it("does not infer provider-specific options from a model name", async () => {
+    const fetchMock = mock(async (_url: string, init?: RequestInit) =>
+      generationResponse(successfulContent(String(init?.body)))
+    );
+    stubFetch(fetchMock);
+
+    await createOpenAIEditorialSummarizer(summaryConfig)(papers, clusters);
+
+    const requestBodies = fetchMock.mock.calls.map((call) => String(call[1]?.body));
+    expect(requestBodies.every((body) => !body.includes("enable_thinking"))).toBeTrue();
   });
 
   it("retries an overview that exposes source scaffolding", async () => {

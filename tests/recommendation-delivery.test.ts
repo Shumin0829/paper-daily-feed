@@ -82,6 +82,28 @@ describe("Recommendation Delivery", () => {
     expect(result.html).not.toContain(">Abstract:</strong>");
   });
 
+  it("renders the paper title instead of an unavailable TLDR for a missing abstract", async () => {
+    stubFetch(mock(async () => new Response("unavailable", { status: 503 })));
+    const titleOnlyRecommendation = {
+      ...recommendation,
+      title: "Income-specific mobility networks reveal metropolitan structure",
+      abstract: ""
+    };
+
+    const result = await deliverRecommendations(
+      [titleOnlyRecommendation],
+      "preview-email",
+      { ...config, dailyRomance: { enabled: false } },
+      {
+        filterUndeliveredPapers: (papers) => papers,
+        confirmSuccessfulDelivery: () => undefined
+      }
+    );
+
+    expect(result.html).toContain(titleOnlyRecommendation.title);
+    expect(result.html).not.toContain("未提供摘要，TLDR 暂时无法生成。");
+  });
+
   it("keeps successful paper TLDRs when the Today Brief fails", async () => {
     stubFetch(
       mock(async (_url: string, init?: RequestInit) => {
