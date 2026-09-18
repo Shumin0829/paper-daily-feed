@@ -245,7 +245,8 @@ describe("Recommendation Delivery", () => {
     );
     const requestBodies = fetchMock.mock.calls.map((call) => String(call[1]?.body));
     expect(requestBodies.some((body) => body.includes("Recommended paper 1"))).toBeTrue();
-    expect(requestBodies.some((body) => body.includes("Reader interests: resilient urban mobility"))).toBeTrue();
+    expect(requestBodies.every((body) => !body.includes("Reader interests:"))).toBeTrue();
+    expect(requestBodies.every((body) => !body.includes("resilient urban mobility"))).toBeTrue();
     expect(requestBodies.every((body) => !body.includes(config.interests.profile.summary))).toBeTrue();
   });
 });
