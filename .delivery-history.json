@@ -120,6 +120,46 @@
     {
       "fingerprint": "9ba8b589fa367a3c8e34e86c857de23546f1bbc125d5b9a687f440fea83dd953",
       "deliveredAt": "2026-09-18T00:15:58.498Z"
+    },
+    {
+      "fingerprint": "d62565d748888ad4eeeda6e8e009101fb393f01a54f9cd7a0889ad4e1f11cb73",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
+    },
+    {
+      "fingerprint": "57af7c4548cdefda147704c1b2f19eda391e6a0346271cc7540972ab0f8672f3",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
+    },
+    {
+      "fingerprint": "632ebfa450650358f1d6172badfbdd46b01ca2003e93c87577d6827f0c115c6d",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
+    },
+    {
+      "fingerprint": "8f04c5204a60316cfd0d76c18fd192329b1c0ca401b0137e1bb41c37d01df933",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
+    },
+    {
+      "fingerprint": "d1720eac2366cd03a8bd654423f0ed7b53a50625058782fb244a9530839b7900",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
+    },
+    {
+      "fingerprint": "118db0fee56821e852d69e57370d713c6dc96b45b4d79b275c6e96c67c13834c",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
+    },
+    {
+      "fingerprint": "6227a4879c1e20b978011d82a712316b32120d399e5106be917e73239f73d53f",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
+    },
+    {
+      "fingerprint": "c30a8b84ce6fbb88ed85410f4ff978929123b34f8de8e4f876deda6c4a80acd2",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
+    },
+    {
+      "fingerprint": "cab6c2cfa1446c6c55ba5e0a4240e58ab0b521f821ded11d2b026d52e09d8d7f",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
+    },
+    {
+      "fingerprint": "2b8ba3443fc0816f9dd99a282b12f02cad310fffa5537d56f5aa8417f4f62534",
+      "deliveredAt": "2026-09-19T00:19:43.768Z"
     }
   ]
 }
