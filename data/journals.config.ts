@@ -187,6 +187,12 @@ const journals: Journal[] = [
     issn: "1569-8432"
   },
   {
+    name: "GIScience & Remote Sensing",
+    abbr: "GISci. Remote Sens.",
+    rss: "https://www.tandfonline.com/feed/rss/tgrs20",
+    issn: "1943-7226"
+  },
+  {
     name: "Remote Sensing of Environment",
     abbr: "RSE",
     rss: "https://rss.sciencedirect.com/publication/science/00344257",
