@@ -21,7 +21,11 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-**智能每日论文推送**，可根据你的研究兴趣或 Zotero 文库个性化筛选。最新、最相关的论文会直接发送到你的邮箱。全流程云端运行，**免费**、**无需本地安装**，配置很快。
+最新、最相关的论文会直接发送到你的邮箱。全流程云端运行，**免费**、**无需本地安装**。使用AI快速配置:
+
+```text
+请帮我部署“每日论文智能推送”，参考文档 `docs/agent-deployment.zh-CN.md`（仓库：`https://github.com/nehSgnaiL/paper-daily-feed`）。
+```
 
 <div align="center">
   <a href="https://doi.org/10.1016/j.tbs.2025.101152" target="_blank" rel="noopener noreferrer">
@@ -33,24 +37,12 @@
   </a>
 </div>
 <div align="center">
-<i>每日论文推送预览。</i>
+<b>智能每日论文推送</b>，可根据你的研究兴趣或 Zotero 文库个性化筛选。
 </div>
 
 ---
 
-<h2>快速开始</h2>
-
-<h3>使用 AI Agent 配置</h3>
-
-粘贴以下指令：
-
-```text
-请按照项目仓库(https://github.com/nehSgnaiL/paper-daily-feed)中的docs/agent-deployment.zh-CN.md，为我部署每日论文智能推送。
-```
-
----
-
-<h3>希望自行配置？</h3>
+<h2>希望自行配置？</h2>
 
 请按照下方手动步骤操作。在 GitHub 上只需几分钟：Fork 仓库、添加凭据、启用工作流。
 

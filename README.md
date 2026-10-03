@@ -21,7 +21,11 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-**Smart daily feeds** tailored to your research interests or Zotero library. Get the latest, most relevant papers **delivered straight to your inbox**. 100% cloud-based, **free**, **no installs**, and quick to set up.
+Get the latest, most relevant papers delivered straight to your inbox. 100% cloud-based, **free**, **no installs**. Set up quickly with AI:
+
+```text
+Please set up smart daily paper delivery for me using `docs/agent-deployment.md` in the repository `https://github.com/nehSgnaiL/paper-daily-feed`.
+```
 
 <div align="center">
   <a href="https://doi.org/10.1016/j.tbs.2025.101152" target="_blank" rel="noopener noreferrer">
@@ -33,24 +37,12 @@
   </a>
 </div>
 <div align="center">
-<i>Preview for daily feeds.</i>
+<b>Smart daily paper feeds</b> tailored to your research interests or Zotero library.
 </div>
 
 ---
 
-<h2>Get started</h2>
-
-<h3>Set up with AI agent</h3>
-
-Paste this instruction:
-
-```text
-Follow docs/agent-deployment.md in the project repository (https://github.com/nehSgnaiL/paper-daily-feed) to set up smart daily paper delivery for me.
-```
-
----
-
-<h3>Prefer to set it up yourself?</h3>
+<h2>Prefer to set it up yourself?</h2>
 
 Follow the manual steps below. It takes a few minutes on GitHub: fork, add credentials, enable workflows.
 
